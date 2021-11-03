@@ -13,18 +13,14 @@ func init() {
 
 func setup(c *caddy.Controller) error {
 	var log = clog.NewWithPlugin(name)
-	for c.Next() {
-		if !c.NextArg() {
-			return plugin.Error("dcache", c.ArgErr())
-		}
-	}
 
-	dcache := New("localhost:6379")
-	dcache.run()
+	dcache := New("127.0.0.1:6379")
+	dcache.log = log
+	log.Infof("connect %v", dcache.connect() == nil)
+	go dcache.run()
 
 	dnsserver.GetConfig(c).AddPlugin(func(next plugin.Handler) plugin.Handler {
 		dcache.Next = next
-		dcache.log = log
 		return dcache
 	})
 
