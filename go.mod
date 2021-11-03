@@ -7,7 +7,7 @@ require (
 	github.com/coredns/coredns v1.8.6
 	github.com/go-redis/redis/v8 v8.11.4
 	github.com/goccy/go-json v0.7.10
-	github.com/hashicorp/golang-lru v0.5.1
+	github.com/hashicorp/golang-lru v0.5.4
 	github.com/json-iterator/go v1.1.12
 	github.com/mailru/easyjson v0.7.7
 	github.com/miekg/dns v1.1.43
