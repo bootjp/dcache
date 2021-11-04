@@ -2,11 +2,11 @@ package dcache
 
 import (
 	"context"
-	"encoding/base64"
-	"errors"
 	"fmt"
 	"math"
 	"time"
+
+	"github.com/goccy/go-json"
 
 	"github.com/coredns/coredns/plugin/pkg/response"
 	"github.com/go-redis/redis/v8"
@@ -45,10 +45,11 @@ func New(host string) *Dcache {
 
 // ServeDNS implements the plugin.Handler interface.
 func (d *Dcache) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) (int, error) {
-	d.log.Info("serve")
 	state := request.Request{Req: r, W: w}
 	unix := time.Now().Unix()
 	cr, hit := d.cache.Get(unix, r, state.Do())
+
+	d.log.Debugf("cache hit %s", hit)
 
 	rw := NewResponsePrinter(w, d.log, d)
 
@@ -56,8 +57,8 @@ func (d *Dcache) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg)
 		return plugin.NextOrFailure(d.Name(), d.Next, ctx, rw, r)
 	}
 
-	cr.SetReply(r)
-	w.WriteMsg(cr)
+	cr.Response.SetReply(r)
+	_ = w.WriteMsg(cr.Response)
 
 	return dns.RcodeSuccess, nil
 }
@@ -90,12 +91,12 @@ func (d *Dcache) Name() string {
 }
 
 func (d *Dcache) run() {
-
-	d.log.Info("run")
-	defer d.pubSubConn.Close()
+	d.log.Info("start distribute cache receive routine")
+	defer func() {
+		_ = d.pubSubConn.Close()
+	}()
 	ctx := context.Background()
 
-	d.log.Info("loop")
 	sub := d.pubSubConn.Subscribe(ctx, d.Name())
 	for {
 		m, err := sub.ReceiveMessage(ctx)
@@ -103,20 +104,12 @@ func (d *Dcache) run() {
 			d.log.Errorf("failed receive %s", err)
 		}
 
-		b, err := base64.RawStdEncoding.DecodeString(m.Payload)
-		if err != nil {
-			d.log.Error("failed decode", err)
-			continue
+		ans := &AnswerCache{}
+		if err := json.Unmarshal([]byte(m.Payload), ans); err != nil {
+			d.log.Errorf("error unmarshal %s got %v", err, ans)
 		}
 
-		msg := &dns.Msg{}
-		err = msg.Unpack(b)
-		if err != nil {
-			d.log.Error("failed unpack", err)
-			continue
-		}
-
-		if err = d.cache.Set(*msg); err != nil {
+		if err = d.cache.Set(ans); err != nil {
 			d.log.Errorf("cache set failed %s", m, err)
 			d.log.Error(err)
 			continue
@@ -138,14 +131,13 @@ func (d *Dcache) minTTL(msg *dns.Msg) uint32 {
 func (d *Dcache) publish(ans *AnswerCache) {
 	ctx := context.Background()
 
-	b, err := ans.Response.Pack()
+	b, err := ans.MarshalJSON()
 	if err != nil {
-		d.log.Errorf("pack error %s %s", err, ans)
+		d.log.Errorf("failed marshal %s %v", err, ans)
 		return
 	}
 
-	msgBase64 := base64.RawStdEncoding.EncodeToString(b)
-	cmd := d.pool.Publish(ctx, d.Name(), msgBase64)
+	cmd := d.pool.Publish(ctx, d.Name(), string(b))
 	if cmd.Err() != nil {
 		d.log.Errorf("error publish", cmd.Err())
 		return
@@ -169,9 +161,8 @@ func NewResponsePrinter(w dns.ResponseWriter, log clog.P, d *Dcache) *ResponsePr
 
 // WriteMsg calls the underlying ResponseWriter's WriteMsg method and prints "example" to standard output.
 func (r *ResponsePrinter) WriteMsg(res *dns.Msg) error {
-	r.log.Info("writemgs")
-
 	do := false
+
 	mt, opt := response.Typify(res, time.Now().UTC())
 	if opt != nil {
 		do = opt.Do()
@@ -181,7 +172,7 @@ func (r *ResponsePrinter) WriteMsg(res *dns.Msg) error {
 	ans := &AnswerCache{
 		Type:      dns.Type(mt),
 		Do:        do,
-		Response:  *res,
+		Response:  res,
 		TimeToDie: now + int64(r.cache.minTTL(res)),
 	}
 
@@ -193,7 +184,7 @@ func (r *ResponsePrinter) WriteMsg(res *dns.Msg) error {
 	case response.OtherError:
 		// todo
 	default:
-		r.log.Warningf("Redis called with unknown typification: %d", mt)
+		r.log.Warningf("unknown type %#v", mt)
 	}
 	return r.ResponseWriter.WriteMsg(res)
 }
@@ -210,12 +201,60 @@ func NewCacheRepository(size int) (*CacheRepository, error) {
 type CacheRepository struct {
 	items *lru.Cache
 }
-
 type AnswerCache struct {
-	Response  dns.Msg  `json:"response"`
+	Response  *dns.Msg `json:"response"`
 	Type      dns.Type `json:"type"`
 	Do        bool     `json:"do"`
 	TimeToDie int64    `json:"time_to_die"`
+}
+
+func (a *AnswerCache) MarshalJSON() ([]byte, error) {
+	if a == nil {
+		return nil, nil
+	}
+
+	b, err := a.Response.Pack()
+	if err != nil {
+		return nil, err
+	}
+
+	return json.Marshal(&struct {
+		Response  []byte
+		Type      dns.Type
+		Do        bool
+		TimeToDie int64
+	}{
+		Response:  b,
+		Type:      a.Type,
+		Do:        a.Do,
+		TimeToDie: a.TimeToDie,
+	})
+}
+func (a *AnswerCache) UnmarshalJSON(data []byte) error {
+	if a == nil {
+		return nil
+	}
+
+	ans := &struct {
+		Type      dns.Type
+		Do        bool
+		TimeToDie int64
+		Response  []byte
+	}{
+		Type:      a.Type,
+		Do:        a.Do,
+		TimeToDie: a.TimeToDie,
+	}
+
+	if err := json.Unmarshal(data, &ans); err != nil {
+		return err
+	}
+
+	a.Type = ans.Type
+	a.Do = ans.Do
+	a.TimeToDie = ans.TimeToDie
+	a.Response = &dns.Msg{}
+	return a.Response.Unpack(ans.Response)
 }
 
 const FormatCacheKey = "%s:%d:%t"
@@ -224,38 +263,42 @@ func (c *CacheRepository) key(name string, t uint16, r bool) string {
 	return fmt.Sprintf(FormatCacheKey, name, t, r)
 }
 
-func (c *CacheRepository) Get(now int64, q *dns.Msg, do bool) (*dns.Msg, bool) {
+func (c *CacheRepository) Get(now int64, q *dns.Msg, do bool) (*AnswerCache, bool) {
+	if len(q.Question) == 0 {
+		return nil, false
+	}
+
 	key := c.key(q.Question[0].Name, q.Question[0].Qtype, do)
-
 	v, ok := c.items.Get(key)
+
 	if !ok {
 		return nil, false
 	}
 
-	cn, ok := v.(dns.Msg)
+	cn, ok := v.(*AnswerCache)
 	if !ok {
 		return nil, false
 	}
 
-	// todo calculate expire
-	//
-	//expire := now-cn.TimeToDie > 0
-	//if expire {
-	//	c.items.Remove(key)
-	//	return nil, false
-	//}
+	expire := now-cn.TimeToDie > 0
+	if expire {
+		c.items.Remove(key)
+		return nil, false
+	}
 
-	return &cn, true
+	return cn, true
 }
 
-func (c *CacheRepository) Set(msg dns.Msg) error {
-	if len(msg.Answer) == 0 {
-		return errors.New("")
+var ErrNotEnoughAnswer error
+
+func (c *CacheRepository) Set(msg *AnswerCache) error {
+	if len(msg.Response.Answer) == 0 {
+		return ErrNotEnoughAnswer
 	}
 
-	qtype := msg.Answer[0].Header().Rrtype
-	name := msg.Answer[0].Header().Name
-	do := msg.IsEdns0().Do()
+	qtype := msg.Response.Answer[0].Header().Rrtype
+	name := msg.Response.Answer[0].Header().Name
+	do := msg.Do
 
 	_ = c.items.Add(c.key(name, qtype, do), msg)
 	return nil

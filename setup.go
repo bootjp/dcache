@@ -16,7 +16,13 @@ func setup(c *caddy.Controller) error {
 
 	dcache := New("127.0.0.1:6379")
 	dcache.log = log
-	log.Infof("connect %v", dcache.connect() == nil)
+
+	if err := dcache.connect(); err != nil {
+		return err
+	}
+
+	log.Infof("redis connect success")
+
 	go dcache.run()
 
 	dnsserver.GetConfig(c).AddPlugin(func(next plugin.Handler) plugin.Handler {
