@@ -49,7 +49,7 @@ func (d *Dcache) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg)
 	unix := time.Now().Unix()
 	cr, hit := d.cache.Get(unix, r, state.Do())
 
-	d.log.Debugf("cache hit %s", hit)
+	d.log.Debugf("cache hit %t", hit)
 
 	rw := NewResponsePrinter(w, d.log, d)
 
@@ -110,7 +110,7 @@ func (d *Dcache) run() {
 		}
 
 		if err = d.cache.Set(ans); err != nil {
-			d.log.Errorf("cache set failed %s", m, err)
+			d.log.Errorf("cache set failed got %v err %s", m, err)
 			d.log.Error(err)
 			continue
 		}
@@ -139,7 +139,7 @@ func (d *Dcache) publish(ans *AnswerCache) {
 
 	cmd := d.pool.Publish(ctx, d.Name(), string(b))
 	if cmd.Err() != nil {
-		d.log.Errorf("error publish", cmd.Err())
+		d.log.Errorf("error publish err %s", cmd.Err())
 		return
 	}
 }
