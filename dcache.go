@@ -295,7 +295,7 @@ func (c *CacheRepository) Get(now int64, r *request.Request) (*AnswerCache, bool
 	return cn, true
 }
 
-var ErrNotEnoughAnswer error
+var ErrNotEnoughAnswer = fmt.Errorf("answer not enough length")
 
 func (c *CacheRepository) Set(msg *AnswerCache) error {
 	if len(msg.Response.Answer) == 0 {
