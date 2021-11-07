@@ -45,9 +45,9 @@ func New(host string) *Dcache {
 
 // ServeDNS implements the plugin.Handler interface.
 func (d *Dcache) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) (int, error) {
-	state := request.Request{Req: r, W: w}
+	state := &request.Request{Req: r, W: w}
 	unix := time.Now().Unix()
-	cr, hit := d.cache.Get(unix, r, state.Do())
+	cr, hit := d.cache.Get(unix, state)
 
 	d.log.Debugf("cache hit %t", hit)
 
@@ -129,6 +129,12 @@ func (d *Dcache) minTTL(msg *dns.Msg) uint32 {
 }
 
 func (d *Dcache) publish(ans *AnswerCache) {
+
+	// truncated data not cache.
+	if ans.Response.Truncated {
+		return
+	}
+
 	ctx := context.Background()
 
 	b, err := ans.MarshalJSON()
@@ -178,7 +184,7 @@ func (r *ResponsePrinter) WriteMsg(res *dns.Msg) error {
 
 	switch mt {
 	case response.NoError, response.Delegation, response.NoData:
-		r.cache.publish(ans)
+		go r.cache.publish(ans)
 	case response.NameError:
 		// todo
 	case response.OtherError:
@@ -186,6 +192,10 @@ func (r *ResponsePrinter) WriteMsg(res *dns.Msg) error {
 	default:
 		r.log.Warningf("unknown type %#v", mt)
 	}
+	res.Answer = filterRRSlice(res.Answer, do)
+	res.Ns = filterRRSlice(res.Ns, do)
+	res.Extra = filterRRSlice(res.Extra, do)
+
 	return r.ResponseWriter.WriteMsg(res)
 }
 
@@ -263,12 +273,8 @@ func (c *CacheRepository) key(name string, t uint16, r bool) string {
 	return fmt.Sprintf(FormatCacheKey, name, t, r)
 }
 
-func (c *CacheRepository) Get(now int64, q *dns.Msg, do bool) (*AnswerCache, bool) {
-	if len(q.Question) == 0 {
-		return nil, false
-	}
-
-	key := c.key(q.Question[0].Name, q.Question[0].Qtype, do)
+func (c *CacheRepository) Get(now int64, r *request.Request) (*AnswerCache, bool) {
+	key := c.key(r.QName(), r.QType(), r.Do())
 	v, ok := c.items.Get(key)
 
 	if !ok {
@@ -300,6 +306,54 @@ func (c *CacheRepository) Set(msg *AnswerCache) error {
 	name := msg.Response.Answer[0].Header().Name
 	do := msg.Do
 
+	newExtra := make([]dns.RR, len(msg.Response.Extra))
+
+	j := 0
+	for _, e := range msg.Response.Extra {
+		if e.Header().Rrtype == dns.TypeOPT {
+			continue
+		}
+		newExtra[j] = e
+		j++
+	}
+	msg.Response.Extra = newExtra[:j]
+
 	_ = c.items.Add(c.key(name, qtype, do), msg)
 	return nil
+}
+
+//https://github.com/coredns/coredns/blob/002b748ccd6b7cc2e3a65f1bd71509f80b95d342/plugin/cache/dnssec.go#L24-L46
+func filterRRSlice(rrs []dns.RR, do bool) []dns.RR {
+	j := 0
+	rs := make([]dns.RR, len(rrs), len(rrs))
+	for _, r := range rrs {
+		if !do && isDNSSEC(r) {
+			continue
+		}
+		if r.Header().Rrtype == dns.TypeOPT {
+			continue
+		}
+
+		rs[j] = r
+		j++
+	}
+	return rs[:j]
+}
+
+// client explicitly asked for it.
+//https://github.com/coredns/coredns/blob/002b748ccd6b7cc2e3a65f1bd71509f80b95d342/plugin/cache/dnssec.go#L5-L22
+func isDNSSEC(r dns.RR) bool {
+	switch r.Header().Rrtype {
+	case dns.TypeNSEC:
+		return true
+	case dns.TypeNSEC3:
+		return true
+	case dns.TypeDS:
+		return true
+	case dns.TypeRRSIG:
+		return true
+	case dns.TypeSIG:
+		return true
+	}
+	return false
 }
