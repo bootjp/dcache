@@ -22,6 +22,13 @@ var (
 		Help:      "The count of cache misses.",
 	}, []string{"server"})
 
+	corruptedCache = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: plugin.Namespace,
+		Subsystem: name,
+		Name:      "discard_cache_total",
+		Help:      "The count of cache discard data of corrupted.",
+	}, []string{"server"})
+
 	redisErr = promauto.NewCounterVec(prometheus.CounterOpts{
 		Namespace: plugin.Namespace,
 		Subsystem: name,

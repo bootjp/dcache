@@ -290,6 +290,8 @@ func (c *CacheRepository) Get(now int64, r *request.Request) (*AnswerCache, bool
 
 	cn, ok := v.(*AnswerCache)
 	if !ok {
+		s := metrics.WithServer(context.Background())
+		corruptedCache.WithLabelValues(s).Inc()
 		return nil, false
 	}
 
