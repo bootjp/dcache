@@ -1,4 +1,4 @@
-module github.com/coredns/coredns/plugin/dcache
+module github.com/bootjp/dcache
 
 go 1.17
 
