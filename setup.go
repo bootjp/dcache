@@ -13,8 +13,17 @@ func init() {
 
 func setup(c *caddy.Controller) error {
 	var log = clog.NewWithPlugin(name)
+	for i := 2; i != 0; i-- {
+		if !c.Next() {
+			return c.SyntaxErr("dcache redishost:port")
+		}
+	}
 
-	dcache := New("127.0.0.1:6379")
+	host := c.Val()
+
+	log.Infof("dcache connect to host name %s", host)
+
+	dcache := New(host)
 	dcache.log = log
 
 	if err := dcache.connect(); err != nil {
