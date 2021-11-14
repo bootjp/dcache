@@ -57,10 +57,10 @@ func (d *Dcache) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg)
 	s := metrics.WithServer(ctx)
 
 	if !hit {
-		cacheHits.WithLabelValues(s).Inc()
+		cacheMisses.WithLabelValues(s).Inc()
 		return plugin.NextOrFailure(d.Name(), d.Next, ctx, rw, r)
 	}
-	cacheMisses.WithLabelValues(s).Inc()
+	cacheHits.WithLabelValues(s).Inc()
 
 	cr.Response.SetReply(r)
 	_ = w.WriteMsg(cr.Response)
