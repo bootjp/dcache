@@ -9,6 +9,7 @@ require (
 	github.com/goccy/go-json v0.7.10
 	github.com/hashicorp/golang-lru v0.5.4
 	github.com/miekg/dns v1.1.43
+	github.com/prometheus/client_golang v1.11.0
 )
 
 require (
@@ -21,7 +22,6 @@ require (
 	github.com/grpc-ecosystem/grpc-opentracing v0.0.0-20180507213350-8e809c8a8645 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.1 // indirect
 	github.com/opentracing/opentracing-go v1.2.0 // indirect
-	github.com/prometheus/client_golang v1.11.0 // indirect
 	github.com/prometheus/client_model v0.2.0 // indirect
 	github.com/prometheus/common v0.31.1 // indirect
 	github.com/prometheus/procfs v0.6.0 // indirect

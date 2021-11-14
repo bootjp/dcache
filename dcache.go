@@ -6,6 +6,8 @@ import (
 	"math"
 	"time"
 
+	"github.com/coredns/coredns/plugin/metrics"
+
 	"github.com/goccy/go-json"
 
 	"github.com/coredns/coredns/plugin/pkg/response"
@@ -52,10 +54,13 @@ func (d *Dcache) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg)
 	d.log.Debugf("cache hit %t", hit)
 
 	rw := NewResponsePrinter(w, d.log, d)
+	s := metrics.WithServer(ctx)
 
 	if !hit {
+		cacheHits.WithLabelValues(s).Inc()
 		return plugin.NextOrFailure(d.Name(), d.Next, ctx, rw, r)
 	}
+	cacheMisses.WithLabelValues(s).Inc()
 
 	cr.Response.SetReply(r)
 	_ = w.WriteMsg(cr.Response)
@@ -145,6 +150,8 @@ func (d *Dcache) publish(ans *AnswerCache) {
 
 	cmd := d.pool.Publish(ctx, d.Name(), string(b))
 	if cmd.Err() != nil {
+		s := metrics.WithServer(ctx)
+		redisErr.WithLabelValues(s).Inc()
 		d.log.Errorf("error publish err %s", cmd.Err())
 		return
 	}
