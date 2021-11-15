@@ -180,7 +180,11 @@ func (r *ResponsePrinter) WriteMsg(res *dns.Msg) error {
 	if opt != nil {
 		do = opt.Do()
 	}
+
 	now := time.Now().UTC().Unix()
+	res.Answer = filterRRSlice(res.Answer, do)
+	res.Ns = filterRRSlice(res.Ns, do)
+	res.Extra = filterRRSlice(res.Extra, do)
 
 	ans := &AnswerCache{
 		Type:      dns.Type(mt),
@@ -199,9 +203,6 @@ func (r *ResponsePrinter) WriteMsg(res *dns.Msg) error {
 	default:
 		r.log.Warningf("unknown type %#v", mt)
 	}
-	res.Answer = filterRRSlice(res.Answer, do)
-	res.Ns = filterRRSlice(res.Ns, do)
-	res.Extra = filterRRSlice(res.Extra, do)
 
 	return r.ResponseWriter.WriteMsg(res)
 }
