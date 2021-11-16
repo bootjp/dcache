@@ -27,7 +27,7 @@ func setup(c *caddy.Controller) error {
 	dcache.log = log
 
 	if err := dcache.connect(); err != nil {
-		return err
+		return plugin.Error(name, err)
 	}
 
 	log.Infof("redis connect success")
