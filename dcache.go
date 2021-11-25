@@ -26,26 +26,29 @@ import (
 
 const name = "dcache"
 
-// Dcache is a plugin that distribute shard cache.
+// Dcache is a plugin that distribute shard successCache.
 type Dcache struct {
 	init bool
 	Addr string
 	Next plugin.Handler
 	log  clog.P
 
-	id         uuid.UUID
-	cache      *CacheRepository
-	pubSubConn *redis.Client
-	pool       *redis.Client
+	id           uuid.UUID
+	successCache *CacheRepository
+	errorCache   *CacheRepository
+	pubSubConn   *redis.Client
+	pool         *redis.Client
 }
 
 func New(host string) *Dcache {
-	l, _ := NewCacheRepository(1000)
+	s, _ := NewCacheRepository(1000)
+	e, _ := NewCacheRepository(1000)
 
 	return &Dcache{
-		Addr:  host,
-		cache: l,
-		id:    uuid.New(),
+		Addr:         host,
+		successCache: s,
+		errorCache:   e,
+		id:           uuid.New(),
 	}
 }
 
@@ -53,23 +56,29 @@ func New(host string) *Dcache {
 func (d *Dcache) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) (int, error) {
 	state := &request.Request{Req: r, W: w}
 	unix := time.Now().Unix()
-	cr, hit := d.cache.Get(unix, state)
-
-	d.log.Debugf("cache hit %t", hit)
-
-	rw := NewResponsePrinter(w, d.log, d)
+	rw := NewResponsePrinter(w, d.log, d, *state)
 	s := metrics.WithServer(ctx)
 
-	if !hit {
-		cacheMisses.WithLabelValues(s).Inc()
-		return plugin.NextOrFailure(d.Name(), d.Next, ctx, rw, r)
+	cr, eHit := d.errorCache.Get(unix, state)
+	if eHit {
+		d.log.Info("errorCache hit")
+		cacheHits.WithLabelValues(s).Inc()
+		cr.Response.SetReply(r)
+		_ = w.WriteMsg(cr.Response)
+		return dns.RcodeSuccess, nil
 	}
-	cacheHits.WithLabelValues(s).Inc()
 
-	cr.Response.SetReply(r)
-	_ = w.WriteMsg(cr.Response)
+	cr, sHit := d.successCache.Get(unix, state)
+	if sHit {
+		d.log.Info("successCache hit")
+		cacheHits.WithLabelValues(s).Inc()
+		cr.Response.SetReply(r)
+		_ = w.WriteMsg(cr.Response)
+		return dns.RcodeSuccess, nil
+	}
 
-	return dns.RcodeSuccess, nil
+	cacheMisses.WithLabelValues(s).Inc()
+	return plugin.NextOrFailure(d.Name(), d.Next, ctx, rw, r)
 }
 
 func (d *Dcache) connect() error {
@@ -125,8 +134,16 @@ func (d *Dcache) run() {
 			continue
 		}
 
-		if err = d.cache.Set(ans); err != nil {
-			d.log.Errorf("cache set failed got %v err %s", m, err)
+		if ans.Error {
+			if err = d.errorCache.Set(ans); err != nil {
+				d.log.Errorf("error cache set failed got %v err %s", m, err)
+				d.log.Error(err)
+			}
+			continue
+		}
+
+		if err = d.successCache.Set(ans); err != nil {
+			d.log.Errorf("success cache set failed got %v err %s", m, err)
 			d.log.Error(err)
 			continue
 		}
@@ -168,50 +185,58 @@ func (d *Dcache) publish(ans *AnswerCache) {
 	}
 }
 
-type ResponsePrinter struct {
+type ResponseWriter struct {
 	dns.ResponseWriter
 	log   clog.P
 	cache *Dcache
+	state request.Request
 }
 
 // NewResponsePrinter returns ResponseWriter.
-func NewResponsePrinter(w dns.ResponseWriter, log clog.P, d *Dcache) *ResponsePrinter {
-	return &ResponsePrinter{
+func NewResponsePrinter(w dns.ResponseWriter, log clog.P, d *Dcache, state request.Request) *ResponseWriter {
+	return &ResponseWriter{
 		ResponseWriter: w,
 		log:            log,
 		cache:          d,
+		state:          state,
 	}
 }
 
 // WriteMsg calls the underlying ResponseWriter's WriteMsg method and prints "example" to standard output.
-func (r *ResponsePrinter) WriteMsg(res *dns.Msg) error {
+func (r *ResponseWriter) WriteMsg(res *dns.Msg) error {
 	do := false
-
-	mt, opt := response.Typify(res, time.Now().UTC())
+	now := time.Now().UTC()
+	mt, opt := response.Typify(res, now)
 	if opt != nil {
 		do = opt.Do()
 	}
 
-	now := time.Now().UTC().Unix()
 	res.Answer = filterRRSlice(res.Answer, do)
 	res.Ns = filterRRSlice(res.Ns, do)
 	res.Extra = filterRRSlice(res.Extra, do)
 
 	ans := &AnswerCache{
+		Name:      r.state.Name(),
 		Type:      dns.Type(mt),
 		Do:        do,
 		Response:  res,
-		TimeToDie: now + int64(r.cache.minTTL(res)),
+		TimeToDie: now.Unix() + int64(r.cache.minTTL(res)),
 		By:        r.cache.id,
 	}
 
 	switch mt {
-	case response.NoError, response.Delegation, response.NoData:
+	case
+		response.NoError,
+		response.Delegation:
 		go r.cache.publish(ans)
-	case response.NameError:
-		// todo
+	case
+		response.NameError,
+		response.NoData,
+		response.ServerError:
+		ans.Error = true
+		go r.cache.publish(ans)
 	case response.OtherError:
-		// todo
+		// do not successCache
 	default:
 		r.log.Warningf("unknown type %#v", mt)
 	}
@@ -232,11 +257,13 @@ type CacheRepository struct {
 	items *lru.Cache
 }
 type AnswerCache struct {
+	Name      string    `json:"name"`
 	Response  *dns.Msg  `json:"response"`
 	Type      dns.Type  `json:"type"`
 	Do        bool      `json:"do"`
 	TimeToDie int64     `json:"time_to_die"`
 	By        uuid.UUID `json:"by"`
+	Error     bool
 }
 
 func (a *AnswerCache) MarshalJSON() ([]byte, error) {
@@ -255,12 +282,16 @@ func (a *AnswerCache) MarshalJSON() ([]byte, error) {
 		Do        bool
 		TimeToDie int64
 		By        string
+		Error     bool
+		Name      string
 	}{
 		Response:  b,
 		Type:      a.Type,
 		Do:        a.Do,
 		TimeToDie: a.TimeToDie,
 		By:        a.By.String(),
+		Error:     a.Error,
+		Name:      a.Name,
 	})
 }
 func (a *AnswerCache) UnmarshalJSON(data []byte) error {
@@ -274,11 +305,15 @@ func (a *AnswerCache) UnmarshalJSON(data []byte) error {
 		TimeToDie int64
 		Response  []byte
 		By        uuid.UUID
+		Error     bool
+		Name      string
 	}{
 		Type:      a.Type,
 		Do:        a.Do,
 		TimeToDie: a.TimeToDie,
 		By:        a.By,
+		Error:     a.Error,
+		Name:      a.Name,
 	}
 
 	if err := json.Unmarshal(data, &ans); err != nil {
@@ -290,6 +325,8 @@ func (a *AnswerCache) UnmarshalJSON(data []byte) error {
 	a.TimeToDie = ans.TimeToDie
 	a.Response = &dns.Msg{}
 	a.By = ans.By
+	a.Name = ans.Name
+	a.Error = ans.Error
 	return a.Response.Unpack(ans.Response)
 }
 
@@ -323,15 +360,9 @@ func (c *CacheRepository) Get(now int64, r *request.Request) (*AnswerCache, bool
 	return cn, true
 }
 
-var ErrNotEnoughAnswer = fmt.Errorf("answer not enough length")
-
 func (c *CacheRepository) Set(msg *AnswerCache) error {
-	if len(msg.Response.Answer) == 0 {
-		return ErrNotEnoughAnswer
-	}
-
-	qtype := msg.Response.Answer[0].Header().Rrtype
-	name := msg.Response.Answer[0].Header().Name
+	qtype := msg.Type
+	name := msg.Name
 	do := msg.Do
 
 	newExtra := make([]dns.RR, len(msg.Response.Extra))
@@ -346,7 +377,7 @@ func (c *CacheRepository) Set(msg *AnswerCache) error {
 	}
 	msg.Response.Extra = newExtra[:j]
 
-	_ = c.items.Add(c.key(name, qtype, do), msg)
+	_ = c.items.Add(c.key(name, uint16(qtype), do), msg)
 	return nil
 }
 

@@ -73,7 +73,6 @@ var cacheTestCases = []cacheTestCase{
 		shouldCache: false,
 	},
 	{
-		// TODO impl negative cache and shouldCache true
 		RecursionAvailable: true,
 		Case: test.Case{
 			Rcode: dns.RcodeNameError,
@@ -89,10 +88,9 @@ var cacheTestCases = []cacheTestCase{
 				test.SOA("example.org. 3600 IN	SOA	sns.dns.icann.org. noc.dns.icann.org. 2016082540 7200 3600 1209600 3600"),
 			},
 		},
-		shouldCache: false,
+		shouldCache: true,
 	},
 	{
-		// todo impl negative cache and shouldCache true
 		RecursionAvailable: true,
 		Case: test.Case{
 			Rcode: dns.RcodeServerFailure,
@@ -104,7 +102,7 @@ var cacheTestCases = []cacheTestCase{
 			Qname: "example.org.", Qtype: dns.TypeA,
 			Ns: []dns.RR{},
 		},
-		shouldCache: false,
+		shouldCache: true,
 	},
 	{
 		RecursionAvailable: true,
@@ -181,12 +179,16 @@ func cacheMsg(m *dns.Msg, tc cacheTestCase) *dns.Msg {
 func newTestCache() (*Dcache, dns.ResponseWriter) {
 	c := New("127.0.0.1:6379")
 	log := clog.P{}
-	crr := NewResponsePrinter(nil, log, c)
-	return c, crr
+
+	return c, &ResponseWriter{
+		ResponseWriter: nil,
+		log:            log,
+		cache:          c,
+	}
 }
 
 func TestCache(t *testing.T) {
-	c, _ := newTestCache()
+	c, crr := newTestCache()
 	if err := c.connect(); err != nil {
 		t.Fatalf("failed connect %s", err)
 	}
@@ -198,25 +200,27 @@ func TestCache(t *testing.T) {
 		m = cacheMsg(m, tc)
 
 		state := &request.Request{W: &test.ResponseWriter{}, Req: m}
-
+		crr.(*ResponseWriter).state = *state
 		ans := &AnswerCache{
+			Name:      state.Name(),
 			Response:  m,
 			Type:      dns.Type(state.QType()),
 			Do:        state.Do(),
 			TimeToDie: time.Now().UTC().Add(1 * time.Minute).Unix(),
+			// By use self cache
 		}
 		c.publish(ans)
 
 		time.Sleep(time.Second)
+		res, eok := c.errorCache.Get(time.Now().UTC().Unix(), state)
+		res, sok := c.successCache.Get(time.Now().UTC().Unix(), state)
 
-		res, ok := c.cache.Get(time.Now().UTC().Unix(), state)
-
-		if ok != tc.shouldCache {
-			t.Errorf("Cached message that should not have been cached: %s type: %s", state.Name(), state.Type())
+		if eok != tc.shouldCache && sok != tc.shouldCache {
+			t.Errorf("Cached message that should not have been cached: %s type: %s cache err %t success %t expect %t\"", state.Name(), state.Type(), eok, sok, tc.shouldCache)
 			continue
 		}
 
-		if ok {
+		if sok {
 			resp := res.Response
 
 			if err := test.Header(tc.Case, resp); err != nil {
