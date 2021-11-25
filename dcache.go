@@ -6,6 +6,8 @@ import (
 	"math"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/coredns/coredns/plugin/metrics"
 
 	"github.com/goccy/go-json"
@@ -31,6 +33,7 @@ type Dcache struct {
 	Next plugin.Handler
 	log  clog.P
 
+	id         uuid.UUID
 	cache      *CacheRepository
 	pubSubConn *redis.Client
 	pool       *redis.Client
@@ -42,6 +45,7 @@ func New(host string) *Dcache {
 	return &Dcache{
 		Addr:  host,
 		cache: l,
+		id:    uuid.New(),
 	}
 }
 
@@ -107,11 +111,18 @@ func (d *Dcache) run() {
 		m, err := sub.ReceiveMessage(ctx)
 		if err != nil {
 			d.log.Errorf("failed receive %s", err)
+			continue
 		}
 
 		ans := &AnswerCache{}
 		if err := json.Unmarshal([]byte(m.Payload), ans); err != nil {
 			d.log.Errorf("error unmarshal %s got %v", err, ans)
+			continue
+		}
+
+		if d.id == ans.By {
+			d.log.Debug("ignore own cache")
+			continue
 		}
 
 		if err = d.cache.Set(ans); err != nil {
@@ -191,6 +202,7 @@ func (r *ResponsePrinter) WriteMsg(res *dns.Msg) error {
 		Do:        do,
 		Response:  res,
 		TimeToDie: now + int64(r.cache.minTTL(res)),
+		By:        r.cache.id,
 	}
 
 	switch mt {
@@ -220,10 +232,11 @@ type CacheRepository struct {
 	items *lru.Cache
 }
 type AnswerCache struct {
-	Response  *dns.Msg `json:"response"`
-	Type      dns.Type `json:"type"`
-	Do        bool     `json:"do"`
-	TimeToDie int64    `json:"time_to_die"`
+	Response  *dns.Msg  `json:"response"`
+	Type      dns.Type  `json:"type"`
+	Do        bool      `json:"do"`
+	TimeToDie int64     `json:"time_to_die"`
+	By        uuid.UUID `json:"by"`
 }
 
 func (a *AnswerCache) MarshalJSON() ([]byte, error) {
@@ -241,11 +254,13 @@ func (a *AnswerCache) MarshalJSON() ([]byte, error) {
 		Type      dns.Type
 		Do        bool
 		TimeToDie int64
+		By        string
 	}{
 		Response:  b,
 		Type:      a.Type,
 		Do:        a.Do,
 		TimeToDie: a.TimeToDie,
+		By:        a.By.String(),
 	})
 }
 func (a *AnswerCache) UnmarshalJSON(data []byte) error {
@@ -258,10 +273,12 @@ func (a *AnswerCache) UnmarshalJSON(data []byte) error {
 		Do        bool
 		TimeToDie int64
 		Response  []byte
+		By        uuid.UUID
 	}{
 		Type:      a.Type,
 		Do:        a.Do,
 		TimeToDie: a.TimeToDie,
+		By:        a.By,
 	}
 
 	if err := json.Unmarshal(data, &ans); err != nil {
@@ -272,6 +289,7 @@ func (a *AnswerCache) UnmarshalJSON(data []byte) error {
 	a.Do = ans.Do
 	a.TimeToDie = ans.TimeToDie
 	a.Response = &dns.Msg{}
+	a.By = ans.By
 	return a.Response.Unpack(ans.Response)
 }
 
