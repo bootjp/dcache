@@ -94,10 +94,12 @@ func (d *Dcache) connect() error {
 
 	if cmd := d.pubSubConn.Ping(ctx); cmd.Err() != nil {
 		d.log.Error("failed connect redis", cmd.Err())
+		return cmd.Err()
 	}
 
 	if cmd := d.pool.Ping(ctx); cmd.Err() != nil {
 		d.log.Error("failed connect redis", cmd.Err())
+		return cmd.Err()
 	}
 
 	return nil
@@ -118,11 +120,12 @@ func (d *Dcache) run() {
 	sub := d.pubSubConn.Subscribe(ctx, d.Name())
 	for {
 		m, err := sub.ReceiveMessage(ctx)
-		d.log.Debug("receive message", m.String())
 		if err != nil {
 			d.log.Errorf("failed receive %s", err)
 			continue
 		}
+
+		d.log.Debug("receive message", m.String())
 
 		ans := &AnswerCache{}
 		if err := json.Unmarshal([]byte(m.Payload), ans); err != nil {
