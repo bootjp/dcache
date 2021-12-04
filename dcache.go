@@ -118,6 +118,7 @@ func (d *Dcache) run() {
 	sub := d.pubSubConn.Subscribe(ctx, d.Name())
 	for {
 		m, err := sub.ReceiveMessage(ctx)
+		d.log.Debug("receive message", m.String())
 		if err != nil {
 			d.log.Errorf("failed receive %s", err)
 			continue
@@ -217,7 +218,7 @@ func (r *ResponseWriter) WriteMsg(res *dns.Msg) error {
 
 	ans := &AnswerCache{
 		Name:      r.state.Name(),
-		Type:      dns.Type(mt),
+		Type:      dns.Type(res.Question[0].Qtype),
 		Do:        do,
 		Response:  res,
 		TimeToDie: now.Unix() + int64(r.cache.minTTL(res)),
