@@ -61,7 +61,7 @@ func (d *Dcache) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg)
 
 	cr, eHit := d.errorCache.Get(unix, state)
 	if eHit {
-		d.log.Info("errorCache hit")
+		d.log.Debug("errorCache hit")
 		cacheHits.WithLabelValues(s).Inc()
 		cr.Response.SetReply(r)
 		_ = w.WriteMsg(cr.Response)
@@ -70,7 +70,7 @@ func (d *Dcache) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg)
 
 	cr, sHit := d.successCache.Get(unix, state)
 	if sHit {
-		d.log.Info("successCache hit")
+		d.log.Debug("successCache hit")
 		cacheHits.WithLabelValues(s).Inc()
 		cr.Response.SetReply(r)
 		_ = w.WriteMsg(cr.Response)
