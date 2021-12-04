@@ -41,8 +41,8 @@ type Dcache struct {
 }
 
 func New(host string) *Dcache {
-	s, _ := NewCacheRepository(1000)
-	e, _ := NewCacheRepository(1000)
+	s, _ := NewCacheRepository(10000)
+	e, _ := NewCacheRepository(10000)
 
 	return &Dcache{
 		Addr:         host,
