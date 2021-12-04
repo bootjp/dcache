@@ -32,7 +32,7 @@ var (
 	redisErr = promauto.NewCounterVec(prometheus.CounterOpts{
 		Namespace: plugin.Namespace,
 		Subsystem: name,
-		Name:      "publish_errors_total",
-		Help:      "The count of errors when publish entries to redis.",
+		Name:      "redis_errors_total",
+		Help:      "The count of errors when publish and subscribe entries to redis.",
 	}, []string{"server"})
 )

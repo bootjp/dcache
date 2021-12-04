@@ -122,6 +122,9 @@ func (d *Dcache) run() {
 		m, err := sub.ReceiveMessage(ctx)
 		if err != nil {
 			d.log.Errorf("failed receive %s", err)
+			s := metrics.WithServer(ctx)
+			redisErr.WithLabelValues(s).Inc()
+			time.Sleep(10 * time.Second)
 			continue
 		}
 
