@@ -207,7 +207,7 @@ func TestCache(t *testing.T) {
 			Type:      dns.Type(state.QType()),
 			Do:        state.Do(),
 			TimeToDie: time.Now().UTC().Add(1 * time.Minute).Unix(),
-			// By use self cache
+			// By is not set use self cache
 		}
 		c.publish(ans)
 

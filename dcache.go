@@ -55,7 +55,7 @@ func New(host string) *Dcache {
 // ServeDNS implements the plugin.Handler interface.
 func (d *Dcache) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) (int, error) {
 	state := &request.Request{Req: r, W: w}
-	unix := time.Now().Unix()
+	unix := time.Now().UTC().Unix()
 	rw := NewResponsePrinter(w, d.log, d, *state)
 	s := metrics.WithServer(ctx)
 
@@ -236,7 +236,7 @@ func (r *ResponseWriter) WriteMsg(res *dns.Msg) error {
 		ans.Error = true
 		go r.cache.publish(ans)
 	case response.OtherError:
-		// do not successCache
+		// do not cache
 	default:
 		r.log.Warningf("unknown type %#v", mt)
 	}
