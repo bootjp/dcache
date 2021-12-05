@@ -6,7 +6,7 @@ require (
 	github.com/coredns/caddy v1.1.1
 	github.com/coredns/coredns v1.8.6
 	github.com/go-redis/redis/v8 v8.11.4
-	github.com/goccy/go-json v0.8.0
+	github.com/goccy/go-json v0.8.1
 	github.com/google/uuid v1.3.0
 	github.com/hashicorp/golang-lru v0.5.4
 	github.com/miekg/dns v1.1.43
