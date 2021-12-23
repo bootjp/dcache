@@ -9,7 +9,7 @@ require (
 	github.com/goccy/go-json v0.8.1
 	github.com/google/uuid v1.3.0
 	github.com/hashicorp/golang-lru v0.5.4
-	github.com/miekg/dns v1.1.44
+	github.com/miekg/dns v1.1.45
 	github.com/prometheus/client_golang v1.11.0
 )
 
