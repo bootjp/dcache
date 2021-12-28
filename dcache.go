@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"runtime/pprof"
 	"time"
 
 	"github.com/google/uuid"
@@ -66,10 +65,6 @@ func (d *Dcache) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg)
 	rw := NewResponsePrinter(w, d.log, d, *state)
 	s := metrics.WithServer(ctx)
 
-	if err := pprof.StartCPUProfile(d._profile); err != nil {
-		d.log.Error(err)
-	}
-	defer pprof.StopCPUProfile()
 	cr, eHit := d.errorCache.Get(unix, state)
 	if eHit {
 		d.log.Debug("errorCache hit")

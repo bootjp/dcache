@@ -1,6 +1,9 @@
 package dcache
 
 import (
+	"os"
+	"runtime/pprof"
+
 	"github.com/coredns/caddy"
 	"github.com/coredns/coredns/core/dnsserver"
 	"github.com/coredns/coredns/plugin"
@@ -9,6 +12,7 @@ import (
 
 func init() {
 	plugin.Register(name, setup)
+
 }
 
 func setup(c *caddy.Controller) error {
@@ -39,5 +43,12 @@ func setup(c *caddy.Controller) error {
 		return dcache
 	})
 
+	f, err := os.Create("/tmp/cpuprofile")
+	if err != nil {
+		panic(err)
+	}
+	if err := pprof.StartCPUProfile(f); err != nil {
+		log.Error(err)
+	}
 	return nil
 }
