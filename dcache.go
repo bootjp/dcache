@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"os"
+	"runtime/pprof"
 	"time"
 
 	"github.com/google/uuid"
@@ -38,27 +40,36 @@ type Dcache struct {
 	errorCache   *CacheRepository
 	pubSubConn   *redis.Client
 	pool         *redis.Client
+
+	_profile *os.File
 }
 
 func New(host string) *Dcache {
 	s, _ := NewCacheRepository(10000)
 	e, _ := NewCacheRepository(10000)
+	f, _ := os.Open("/tmp/cpu.pprof")
 
 	return &Dcache{
 		Addr:         host,
 		successCache: s,
 		errorCache:   e,
 		id:           uuid.New(),
+		_profile:     f,
 	}
 }
 
 // ServeDNS implements the plugin.Handler interface.
 func (d *Dcache) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) (int, error) {
+
 	state := &request.Request{Req: r, W: w}
 	unix := time.Now().UTC().Unix()
 	rw := NewResponsePrinter(w, d.log, d, *state)
 	s := metrics.WithServer(ctx)
 
+	if err := pprof.StartCPUProfile(d._profile); err != nil {
+		d.log.Error(err)
+	}
+	defer pprof.StopCPUProfile()
 	cr, eHit := d.errorCache.Get(unix, state)
 	if eHit {
 		d.log.Debug("errorCache hit")
