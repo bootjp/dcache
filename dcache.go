@@ -2,9 +2,11 @@ package dcache
 
 import (
 	"context"
-	"fmt"
+	"hash/fnv"
 	"math"
 	"time"
+
+	"github.com/coredns/coredns/plugin/pkg/cache"
 
 	"github.com/google/uuid"
 
@@ -19,7 +21,6 @@ import (
 
 	"github.com/coredns/coredns/plugin"
 	clog "github.com/coredns/coredns/plugin/pkg/log"
-	lru "github.com/hashicorp/golang-lru"
 
 	"github.com/miekg/dns"
 )
@@ -252,16 +253,13 @@ func (r *ResponseWriter) WriteMsg(res *dns.Msg) error {
 }
 
 func NewCacheRepository(size int) (*CacheRepository, error) {
-	c, err := lru.New(size)
-	if err != nil {
-		return nil, err
-	}
-
-	return &CacheRepository{items: c}, nil
+	return &CacheRepository{
+		items: cache.New(size),
+	}, nil
 }
 
 type CacheRepository struct {
-	items *lru.Cache
+	items *cache.Cache
 }
 type AnswerCache struct {
 	Name      string    `json:"name"`
@@ -339,12 +337,35 @@ func (a *AnswerCache) UnmarshalJSON(data []byte) error {
 
 const FormatCacheKey = "%s:%d:%t"
 
-func (c *CacheRepository) key(name string, t uint16, r bool) string {
-	return fmt.Sprintf(FormatCacheKey, name, t, r)
+// by https://github.com/coredns/coredns/blob/002b748ccd6b7cc2e3a65f1bd71509f80b95d342/plugin/cache/cache.go#L68-L87
+func (*CacheRepository) key(qname string, m *dns.Msg, t uint16) (bool, uint64) {
+	// We don't store truncated responses.
+	if m.Truncated {
+		return false, 0
+	}
+	// Nor errors or Meta or Update.
+	if t == uint16(response.OtherError) || t == uint16(response.Meta) || t == uint16(response.Update) {
+		return false, 0
+	}
+
+	return true, hash(qname, t)
+}
+
+func hash(qname string, qtype uint16) uint64 {
+	h := fnv.New64()
+	h.Write([]byte{byte(qtype >> 8)})
+	h.Write([]byte{byte(qtype)})
+	h.Write([]byte(qname))
+	return h.Sum64()
 }
 
 func (c *CacheRepository) Get(now int64, r *request.Request) (*AnswerCache, bool) {
-	key := c.key(r.QName(), r.QType(), r.Do())
+	//request.s
+	//key
+	ok, key := c.key(r.QName(), r.Req, r.QType())
+	if !ok {
+		return nil, false
+	}
 	v, ok := c.items.Get(key)
 
 	if !ok {
@@ -370,7 +391,6 @@ func (c *CacheRepository) Get(now int64, r *request.Request) (*AnswerCache, bool
 func (c *CacheRepository) Set(msg *AnswerCache) error {
 	qtype := msg.Type
 	name := msg.Name
-	do := msg.Do
 
 	newExtra := make([]dns.RR, len(msg.Response.Extra))
 
@@ -384,7 +404,11 @@ func (c *CacheRepository) Set(msg *AnswerCache) error {
 	}
 	msg.Response.Extra = newExtra[:j]
 
-	_ = c.items.Add(c.key(name, uint16(qtype), do), msg)
+	ok, key := c.key(name, msg.Response, uint16(qtype))
+	if !ok {
+		return nil
+	}
+	_ = c.items.Add(key, msg)
 	return nil
 }
 
