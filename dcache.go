@@ -6,11 +6,11 @@ import (
 	"math"
 	"time"
 
+	gonanoid "github.com/matoous/go-nanoid"
+
 	"github.com/oleiade/lane"
 
 	"github.com/coredns/coredns/plugin/pkg/cache"
-
-	"github.com/google/uuid"
 
 	"github.com/coredns/coredns/plugin/metrics"
 
@@ -36,7 +36,7 @@ type Dcache struct {
 	Next plugin.Handler
 	log  clog.P
 
-	id           uuid.UUID
+	id           string
 	successCache *CacheRepository
 	errorCache   *CacheRepository
 	subscribeCon *redis.Client
@@ -52,7 +52,7 @@ func New(host string) *Dcache {
 		Addr:         host,
 		successCache: s,
 		errorCache:   e,
-		id:           uuid.New(),
+		id:           gonanoid.MustID(10),
 		queue:        lane.NewQueue(),
 	}
 }
@@ -284,12 +284,12 @@ type CacheRepository struct {
 	items *cache.Cache
 }
 type AnswerCache struct {
-	Name      string    `json:"name"`
-	Response  *dns.Msg  `json:"response"`
-	Type      dns.Type  `json:"type"`
-	Do        bool      `json:"do"`
-	TimeToDie int64     `json:"time_to_die"`
-	By        uuid.UUID `json:"by"`
+	Name      string   `json:"name"`
+	Response  *dns.Msg `json:"response"`
+	Type      dns.Type `json:"type"`
+	Do        bool     `json:"do"`
+	TimeToDie int64    `json:"time_to_die"`
+	By        string   `json:"by"`
 	Error     bool
 }
 
@@ -316,7 +316,7 @@ func (a *AnswerCache) MarshalJSON() ([]byte, error) {
 		Type:      a.Type,
 		Do:        a.Do,
 		TimeToDie: a.TimeToDie,
-		By:        a.By.String(),
+		By:        a.By,
 		Error:     a.Error,
 		Name:      a.Name,
 	})
@@ -331,7 +331,7 @@ func (a *AnswerCache) UnmarshalJSON(data []byte) error {
 		Do        bool
 		TimeToDie int64
 		Response  []byte
-		By        uuid.UUID
+		By        string
 		Error     bool
 		Name      string
 	}{
@@ -373,15 +373,22 @@ func (*CacheRepository) key(qname string, m *dns.Msg, t uint16) (bool, uint64) {
 
 func hash(qname string, qtype uint16) uint64 {
 	h := fnv.New64()
-	h.Write([]byte{byte(qtype >> 8)})
-	h.Write([]byte{byte(qtype)})
-	h.Write([]byte(qname))
+	_, err := h.Write([]byte{byte(qtype >> 8)})
+	if err != nil {
+		return 0
+	}
+	_, err = h.Write([]byte{byte(qtype)})
+	if err != nil {
+		return 0
+	}
+	_, err = h.Write([]byte(qname))
+	if err != nil {
+		return 0
+	}
 	return h.Sum64()
 }
 
 func (c *CacheRepository) Get(now int64, r *request.Request) (*AnswerCache, bool) {
-	//request.s
-	//key
 	ok, key := c.key(r.QName(), r.Req, r.QType())
 	if !ok {
 		return nil, false

@@ -7,9 +7,9 @@ require (
 	github.com/coredns/coredns v1.8.6
 	github.com/go-redis/redis/v8 v8.11.4
 	github.com/goccy/go-json v0.8.1
-	github.com/google/uuid v1.3.0
-	github.com/hashicorp/golang-lru v0.5.4
+	github.com/matoous/go-nanoid v1.5.0
 	github.com/miekg/dns v1.1.45
+	github.com/oleiade/lane v1.0.1
 	github.com/prometheus/client_golang v1.11.0
 )
 
@@ -22,7 +22,6 @@ require (
 	github.com/golang/protobuf v1.5.2 // indirect
 	github.com/grpc-ecosystem/grpc-opentracing v0.0.0-20180507213350-8e809c8a8645 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.1 // indirect
-	github.com/oleiade/lane v1.0.1 // indirect
 	github.com/opentracing/opentracing-go v1.2.0 // indirect
 	github.com/prometheus/client_model v0.2.0 // indirect
 	github.com/prometheus/common v0.31.1 // indirect
