@@ -199,6 +199,7 @@ func (d *Dcache) publish(ans *AnswerCache) {
 }
 
 func (d *Dcache) runPublish() {
+	d.log.Info("start distribute cache publish routine")
 	defer func() {
 		_ = d.publishCon.Close()
 	}()
