@@ -6,6 +6,8 @@ import (
 	"math"
 	"time"
 
+	"github.com/oleiade/lane"
+
 	"github.com/coredns/coredns/plugin/pkg/cache"
 
 	"github.com/google/uuid"
@@ -39,6 +41,7 @@ type Dcache struct {
 	errorCache   *CacheRepository
 	pubSubConn   *redis.Client
 	pool         *redis.Client
+	queue        *lane.Queue
 }
 
 func New(host string) *Dcache {
@@ -50,6 +53,7 @@ func New(host string) *Dcache {
 		successCache: s,
 		errorCache:   e,
 		id:           uuid.New(),
+		queue:        lane.NewQueue(),
 	}
 }
 
@@ -111,7 +115,7 @@ func (d *Dcache) Name() string {
 	return name
 }
 
-func (d *Dcache) run() {
+func (d *Dcache) runSubscribe() {
 	d.log.Info("start distribute cache receive routine")
 	defer func() {
 		_ = d.pubSubConn.Close()
@@ -168,7 +172,6 @@ func (d *Dcache) minTTL(msg *dns.Msg) uint32 {
 
 	return min
 }
-
 func (d *Dcache) publish(ans *AnswerCache) {
 
 	// truncated data not cache.
@@ -190,6 +193,19 @@ func (d *Dcache) publish(ans *AnswerCache) {
 		redisErr.WithLabelValues(s).Inc()
 		d.log.Errorf("error publish err %s", cmd.Err())
 		return
+	}
+}
+
+func (d *Dcache) runPublish() {
+	for {
+		item := d.queue.Dequeue()
+		if item == nil {
+			time.Sleep(1 * time.Second)
+			continue
+		}
+
+		ans := item.(*AnswerCache)
+		d.publish(ans)
 	}
 }
 
@@ -236,13 +252,13 @@ func (r *ResponseWriter) WriteMsg(res *dns.Msg) error {
 	case
 		response.NoError,
 		response.Delegation:
-		go r.cache.publish(ans)
+		r.cache.queue.Enqueue(ans)
 	case
 		response.NameError,
 		response.NoData,
 		response.ServerError:
 		ans.Error = true
-		go r.cache.publish(ans)
+		r.cache.queue.Enqueue(ans)
 	case response.OtherError:
 		// do not cache
 	default:
@@ -334,8 +350,6 @@ func (a *AnswerCache) UnmarshalJSON(data []byte) error {
 	a.Error = ans.Error
 	return a.Response.Unpack(ans.Response)
 }
-
-const FormatCacheKey = "%s:%d:%t"
 
 // by https://github.com/coredns/coredns/blob/002b748ccd6b7cc2e3a65f1bd71509f80b95d342/plugin/cache/cache.go#L68-L87
 func (*CacheRepository) key(qname string, m *dns.Msg, t uint16) (bool, uint64) {

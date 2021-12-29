@@ -192,7 +192,9 @@ func TestCache(t *testing.T) {
 	if err := c.connect(); err != nil {
 		t.Fatalf("failed connect %s", err)
 	}
-	go c.run()
+	go c.runSubscribe()
+	go c.runPublish()
+
 	time.Sleep(time.Second)
 
 	for _, tc := range cacheTestCases {
@@ -209,9 +211,9 @@ func TestCache(t *testing.T) {
 			TimeToDie: time.Now().UTC().Add(1 * time.Minute).Unix(),
 			// By is not set use self cache
 		}
-		c.publish(ans)
+		c.queue.Enqueue(ans)
 
-		time.Sleep(time.Second)
+		time.Sleep(2 * time.Second)
 		res, eok := c.errorCache.Get(time.Now().UTC().Unix(), state)
 		res, sok := c.successCache.Get(time.Now().UTC().Unix(), state)
 

@@ -32,7 +32,8 @@ func setup(c *caddy.Controller) error {
 
 	log.Infof("redis connect success")
 
-	go dcache.run()
+	go dcache.runSubscribe()
+	go dcache.runPublish()
 
 	dnsserver.GetConfig(c).AddPlugin(func(next plugin.Handler) plugin.Handler {
 		dcache.Next = next
