@@ -39,8 +39,8 @@ type Dcache struct {
 	id           uuid.UUID
 	successCache *CacheRepository
 	errorCache   *CacheRepository
-	pubSubConn   *redis.Client
-	pool         *redis.Client
+	subscribeCon *redis.Client
+	publishCon   *redis.Client
 	queue        *lane.Queue
 }
 
@@ -89,20 +89,22 @@ func (d *Dcache) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg)
 func (d *Dcache) connect() error {
 	ctx := context.Background()
 
-	d.pool = redis.NewClient(&redis.Options{
-		Addr: d.Addr,
+	d.publishCon = redis.NewClient(&redis.Options{
+		Addr:     d.Addr,
+		PoolSize: 1,
 	})
 
-	d.pubSubConn = redis.NewClient(&redis.Options{
-		Addr: d.Addr,
+	d.subscribeCon = redis.NewClient(&redis.Options{
+		Addr:     d.Addr,
+		PoolSize: 1,
 	})
 
-	if cmd := d.pubSubConn.Ping(ctx); cmd.Err() != nil {
+	if cmd := d.subscribeCon.Ping(ctx); cmd.Err() != nil {
 		d.log.Error("failed connect redis", cmd.Err())
 		return cmd.Err()
 	}
 
-	if cmd := d.pool.Ping(ctx); cmd.Err() != nil {
+	if cmd := d.publishCon.Ping(ctx); cmd.Err() != nil {
 		d.log.Error("failed connect redis", cmd.Err())
 		return cmd.Err()
 	}
@@ -118,11 +120,11 @@ func (d *Dcache) Name() string {
 func (d *Dcache) runSubscribe() {
 	d.log.Info("start distribute cache receive routine")
 	defer func() {
-		_ = d.pubSubConn.Close()
+		_ = d.subscribeCon.Close()
 	}()
 	ctx := context.Background()
 
-	sub := d.pubSubConn.Subscribe(ctx, d.Name())
+	sub := d.subscribeCon.Subscribe(ctx, d.Name())
 	for {
 		m, err := sub.ReceiveMessage(ctx)
 		if err != nil {
@@ -187,7 +189,7 @@ func (d *Dcache) publish(ans *AnswerCache) {
 		return
 	}
 
-	cmd := d.pool.Publish(ctx, d.Name(), string(b))
+	cmd := d.publishCon.Publish(ctx, d.Name(), string(b))
 	if cmd.Err() != nil {
 		s := metrics.WithServer(ctx)
 		redisErr.WithLabelValues(s).Inc()
@@ -197,6 +199,9 @@ func (d *Dcache) publish(ans *AnswerCache) {
 }
 
 func (d *Dcache) runPublish() {
+	defer func() {
+		_ = d.publishCon.Close()
+	}()
 	for {
 		item := d.queue.Dequeue()
 		if item == nil {
