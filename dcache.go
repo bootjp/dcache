@@ -4,6 +4,7 @@ import (
 	"context"
 	"hash/fnv"
 	"math"
+	"net"
 	"time"
 
 	gonanoid "github.com/matoous/go-nanoid"
@@ -34,8 +35,8 @@ type Dcache struct {
 	init bool
 	Addr string
 	Next plugin.Handler
-	log  clog.P
 
+	log          clog.P
 	id           string
 	successCache *CacheRepository
 	errorCache   *CacheRepository
@@ -217,9 +218,20 @@ func (d *Dcache) runPublish() {
 
 type ResponseWriter struct {
 	dns.ResponseWriter
-	log   clog.P
-	cache *Dcache
-	state request.Request
+	log        clog.P
+	cache      *Dcache
+	state      request.Request
+	do         bool
+	prefetch   bool
+	remoteAddr net.Addr
+}
+
+// RemoteAddr implements the dns.ResponseWriter interface.
+func (r *ResponseWriter) RemoteAddr() net.Addr {
+	if r.remoteAddr != nil {
+		return r.remoteAddr
+	}
+	return r.ResponseWriter.RemoteAddr()
 }
 
 // NewResponsePrinter returns ResponseWriter.

@@ -10,7 +10,6 @@ import (
 
 	clog "github.com/coredns/coredns/plugin/pkg/log"
 
-	"github.com/coredns/coredns/plugin"
 	"github.com/coredns/coredns/plugin/test"
 	"github.com/coredns/coredns/request"
 
@@ -247,39 +246,50 @@ func TestCache(t *testing.T) {
 
 func BenchmarkCacheResponse(b *testing.B) {
 	c := New("127.0.0.1:6379")
-	c.connect()
-	c.Next = BackendHandler()
-
+	c.log = clog.NewWithPlugin("test")
 	ctx := context.TODO()
+
+	if err := c.connect(); err != nil {
+		panic(err)
+	}
+
+	go c.runSubscribe()
+	go c.runPublish()
+	time.Sleep(5 * time.Second)
 
 	reqs := make([]*dns.Msg, 5)
 	for i, q := range []string{"example1", "example2", "a", "b", "ddd"} {
+		qname := q + ".example.org."
 		reqs[i] = new(dns.Msg)
-		reqs[i].SetQuestion(q+".example.org.", dns.TypeA)
+		reqs[i].SetQuestion(qname, dns.TypeA)
+		reqs[i].Question[0].Name = qname
+		reqs[i].Question[0].Qtype = dns.TypeA
+
+		resp := &dns.Msg{}
+		resp.Answer = []dns.RR{
+			test.A(qname + "	3600	IN	A	104.21.15.181"),
+			test.A(qname + "	3600	IN	A	195.201.182.103"),
+		}
+
+		now := time.Now()
+
+		c.publish(&AnswerCache{
+			Name:      qname,
+			Response:  resp,
+			Type:      dns.Type(dns.TypeA),
+			Do:        false,
+			TimeToDie: now.Unix() + int64(c.minTTL(resp)),
+			By:        "a",
+			Error:     false,
+		})
 	}
 
+	time.Sleep(10 * time.Second)
+	b.ResetTimer()
 	b.StartTimer()
-
-	j := 0
 	for i := 0; i < b.N; i++ {
-		req := reqs[j]
-		c.ServeDNS(ctx, &test.ResponseWriter{}, req)
-		j = (j + 1) % 5
+		for _, req := range reqs {
+			c.ServeDNS(ctx, &test.ResponseWriter{}, req)
+		}
 	}
-}
-
-//
-func BackendHandler() plugin.Handler {
-	return plugin.HandlerFunc(func(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) (int, error) {
-		m := new(dns.Msg)
-		m.SetReply(r)
-		m.Response = true
-		m.RecursionAvailable = true
-
-		owner := m.Question[0].Name
-		m.Answer = []dns.RR{test.A(owner + " 303 IN A 127.0.0.53")}
-
-		w.WriteMsg(m)
-		return dns.RcodeSuccess, nil
-	})
 }
