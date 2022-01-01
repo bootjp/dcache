@@ -23,8 +23,11 @@ but dcache uses Pub/Sub to keep the cache data in memory asynchronously.
 
 dcache provides better latency than redisc in environments with very large DNS queries such as crawling.
 
+## Config 
 
-## Example
+### Example
+
+all zone enable dcache.
 ```
 . {
     forward . 1.1.1.1
@@ -32,3 +35,20 @@ dcache provides better latency than redisc in environments with very large DNS q
     dcache example.org:6379
 }
 ```
+
+### syntax
+```
+
+dcache [Redishost]:[Port]
+
+```
+
+
+## Metrics
+
+If monitoring is enabled (via the *prometheus* directive) then the following metrics are exported:
+
+* `coredns_dcache_hits_total{server}` - Counter of cache hits.
+* `coredns_dcache_misses_total{server}` - Counter of cache misses.
+* `coredns_dcache_redis_errors_total{server}` - Counter of errors when connecting to Redis. 
+* `coredns_dcache_discard_cache_total{server}` - Counter of data that failed deserialization.
