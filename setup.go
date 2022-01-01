@@ -30,7 +30,7 @@ func setup(c *caddy.Controller) error {
 		return plugin.Error(name, err)
 	}
 
-	log.Infof("redis connect success")
+	log.Info("redis connect success")
 
 	go dcache.runSubscribe()
 	go dcache.runPublish()
